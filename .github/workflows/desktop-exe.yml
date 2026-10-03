@@ -1,0 +1,104 @@
+# Build the DeepSeek Harness desktop exe on a GitHub Actions Windows runner.
+# Run manually from the Actions tab ("Run workflow"). No secrets are required;
+# this produces the unsigned local-test installer only.
+name: desktop-exe-win-x64
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: >-
+          Optional build version extending the package version, for example
+          0.2.0-rc.2-test.20261003.1. Empty publishes the package version.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  # CI runs must never report to the production telemetry endpoint.
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  win-x64:
+    runs-on: windows-2025
+    timeout-minutes: 240
+    steps:
+      - name: Enable Windows Developer Mode (symlink support)
+        shell: pwsh
+        run: >-
+          reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
+          /t REG_DWORD /f /v "AllowDevelopmentWithoutDevLicense" /d "1"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pnpm 11.7.0
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Write local packaging settings
+        shell: pwsh
+        run: |
+          $lines = @(
+            'DSH_DESKTOP_APP_ID=com.deepseek.harness',
+            'DSH_DESKTOP_AUTO_UPDATE_ENV=test',
+            'DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN=https://127.0.0.1',
+            "DSH_DESKTOP_MANDATORY_UPDATE_CONFIG='{""allowedAuthOrigins"":[""https://127.0.0.1""]}'"
+          )
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'apps\desktop'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Set-Content -Path (Join-Path $dir '.env.windows') -Value ($lines -join "`r`n") -Encoding Ascii
+          Get-Content (Join-Path $dir '.env.windows')
+
+      - name: Install dependencies (immutable)
+        shell: pwsh
+        run: pnpm install --frozen-lockfile
+
+      - name: Package the desktop application
+        shell: pwsh
+        env:
+          BUILD_VERSION: ${{ inputs.build_version }}
+        run: |
+          if ($env:BUILD_VERSION) {
+            pnpm run package:desktop:win:x64:unsigned -- --build-version $env:BUILD_VERSION
+          } else {
+            pnpm run package:desktop:win:x64:unsigned
+          }
+
+      - name: List artifacts
+        if: always()
+        shell: pwsh
+        run: |
+          $out = 'apps\desktop\.desktop-build\targets\win-x64\unsigned-artifacts'
+          if (Test-Path $out) { Get-ChildItem $out | Select-Object Name, Length | Format-Table -AutoSize }
+
+      - name: Upload unsigned installer
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepseek-harness-win-x64-unsigned
+          path: apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload packaging run logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaging-run-logs
+          path: apps/desktop/.desktop-build/packaging-runs/
+          retention-days: 7
+          compression-level: 9
