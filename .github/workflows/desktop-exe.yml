@@ -81,10 +81,15 @@ jobs:
       - name: Package the desktop application
         shell: pwsh
         env:
-          BUILD_VERSION: ${{ inputs.build_version }}
+          BUILD_VERSION_INPUT: ${{ inputs.build_version }}
         run: |
-          if ($env:BUILD_VERSION) {
-            pnpm run package:desktop:win:x64:unsigned -- --build-version $env:BUILD_VERSION
+          # Trim spaces and a v/V prefix so a pasted "V0.2.0-rc.2" still works.
+          $version = $env:BUILD_VERSION_INPUT.Trim() -replace '^[vV]', ''
+          if ($env:BUILD_VERSION_INPUT -ne $version.Trim() -or $env:BUILD_VERSION_INPUT -ne $env:BUILD_VERSION_INPUT.Trim()) {
+            Write-Host "Normalized build_version input '$($env:BUILD_VERSION_INPUT)' to '$version'"
+          }
+          if ($version) {
+            pnpm run package:desktop:win:x64:unsigned -- --build-version $version
           } else {
             pnpm run package:desktop:win:x64:unsigned
           }
@@ -224,10 +229,12 @@ jobs:
       - name: Package the macOS application
         shell: pwsh
         env:
-          BUILD_VERSION: ${{ inputs.build_version }}
+          BUILD_VERSION_INPUT: ${{ inputs.build_version }}
         run: |
-          if ($env:BUILD_VERSION) {
-            pnpm run package:desktop:${{ matrix.target }} -- --build-version $env:BUILD_VERSION
+          # Trim spaces and a v/V prefix so a pasted "V0.2.0-rc.2" still works.
+          $version = $env:BUILD_VERSION_INPUT.Trim() -replace '^[vV]', ''
+          if ($version) {
+            pnpm run package:desktop:${{ matrix.target }} -- --build-version $version
           } else {
             pnpm run package:desktop:${{ matrix.target }}
           }
